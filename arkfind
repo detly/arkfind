@@ -452,21 +452,13 @@ def verbose_reporter():
 def json_reporter():
     """ Prepare a JSON encoder for search results. This needs to be a context
     manager so that the list-of-list of paths can be appropriately delimited.
-    """    
-    # If we want to just call json.dump to process the whole thing, we need to
-    # keep every entry in memory. Instead, manually format the delimiting but
-    # let the json module do the actual data dumping.
+    """
+    contents = deque()
     def report_single_result(paths):
-        json.dump(
-            [p.joined.encode('utf8') for p in paths],
-            sys.stdout,
-            ensure_ascii=False
-        )
-        sys.stdout.write(',\n')
-    
-    sys.stdout.write('[\n')   
+        contents.append([p.joined.encode('utf8') for p in paths])
     yield report_single_result
-    sys.stdout.write(']\n')
+    json.dump(list(contents), sys.stdout, ensure_ascii=False)
+    sys.stdout.write('\n')
 
 
 # Our script needs a starting point, and that could be a directory OR an
