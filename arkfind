@@ -10,9 +10,10 @@ procedure.
 
 import argparse
 from collections import deque
-from contextlib import closing
+from contextlib import closing, contextmanager
 from cStringIO import StringIO
 from fnmatch import fnmatchcase
+import json
 from os import walk
 import os.path
 import posixpath
@@ -25,7 +26,7 @@ import magic
 # Help text for command-line invocation
 PROG_TEXT = (
 "Recursively search for files by name, including inside certain kinds of "
-"archives. Supported archives include .TAR, .TAR.GZ and .TAR.BZ2"
+"archives. Supported archives include .ZIP, .TAR, .TAR.GZ and .TAR.BZ2"
 )
 
 # Leading text for results
@@ -371,6 +372,9 @@ class ZipWalker(object):
 # The following classes deal with filtering the results from a file search.
 # They're effectively closures over the text or pattern being searched for.
 
+def MatchAll(_):
+    return True
+
 class TextSearcher(object):
     """ Simple, non-wildcard search for text in a file name. Can be case-
     sensitive or case-insensitive.
@@ -421,19 +425,44 @@ class GlobSearcher(object):
         )
         return found
 
+# The following deal with presenting the results of a search. They're context
+# managers because we might need some sort of opening/closing delimiting (eg.
+# for JSON or XML).
 
-def present_result(paths):
+@contextmanager
+def verbose_reporter():
     """ Format and present a matching path, which could be nested to some
-    arbitarily depth. """
-    print paths[0].joined.encode(CLI_ENCODING)
+    arbitarily depth, in a way that's easy to visually parse. """
+    # We don't actually need a context manager here, so just create the function
+    # and yield it.
+    def reporter(paths):        
+        print paths[0].joined.encode(CLI_ENCODING)
+        
+        if len(paths) > 1:
+            indent_level = 0
+            for path in paths[1:]:
+                leading = " "*indent_level*len(RESULT_INDENT)
+                res_string = "%s%s%s" % (leading, RESULT_INDENT, path.joined)
+                print res_string.encode(CLI_ENCODING)
+                indent_level += 1
+    yield reporter
+
+
+@contextmanager
+def json_reporter():
+    """ Prepare a JSON encoder for search results. This needs to be a context
+    manager so that the list-of-list of paths can be appropriately delimited.
+    """
+    def report_single_result(paths):
+        json.dump(
+            [p.joined.encode('utf8') for p in paths],
+            sys.stdout,
+            ensure_ascii=False
+        )
     
-    if len(paths) > 1:
-        indent_level = 0
-        for path in paths[1:]:
-            leading = " "*indent_level*len(RESULT_INDENT)
-            res_string = "%s%s%s" % (leading, RESULT_INDENT, path.joined)
-            print res_string.encode(CLI_ENCODING)
-            indent_level += 1
+    sys.stdout.write('[\n')   
+    yield report_single_result
+    sys.stdout.write('\n]\n')
 
 
 # Our script needs a starting point, and that could be a directory OR an
@@ -449,7 +478,7 @@ SEARCH_BASES = {
 # If the starting point is neither directory nor archive, it's the only result
 DEFAULT_SEARCH_BASE = NamedNode.single
 
-def archive_search(base_path, search_func):
+def archive_search(base_path, search_func, reporter):
     """ Recursively list all files and directories below the given base path,
     checking inside directories and archives to an arbitrary depth, and
     filtering using the given filter function.
@@ -464,27 +493,35 @@ def archive_search(base_path, search_func):
     # Iterate over a stack of discovered files, filtering as we go
     to_process = deque((base_path_class(base_path),))
     
-    while to_process:
-        node = to_process.pop()
-        paths = node.paths
-        
-        if search_func(paths):
-            present_result(paths)
+    with reporter() as report_func:
+        while to_process:
+            node = to_process.pop()
+            paths = node.paths
             
-        # If this node has contents, add them to the stack and keep iterating
-        to_process.extendleft(node.contents)
+            if search_func(paths):
+                report_func(paths)
+            
+            # If this node has contents, add them to the stack and keep iterating
+            to_process.extendleft(node.contents)
 
 
-def main(base_path, search_text, case_sensitive=False, glob=False):
+def main(base_path, search_text=None, case_sensitive=False, glob=False, json=False):
     """ Glue between the command-line flags and invoking the search function
     with the appropriate filter function.
     """
-    if glob:
+    if json:
+        reporter = json_reporter
+    else:
+        reporter = verbose_reporter
+    
+    if search_text is None:
+        search_func = MatchAll
+    elif glob:
         search_func = GlobSearcher(search_text, case_sensitive)
     else:
         search_func = TextSearcher(search_text, case_sensitive)
     
-    archive_search(Path.os(base_path), search_func)
+    archive_search(Path.os(base_path), search_func, reporter)
     
 
 if __name__ == '__main__':
@@ -494,15 +531,26 @@ if __name__ == '__main__':
         description=PROG_TEXT
     )
     parser.add_argument('search_path')
-    parser.add_argument('search_text')
+    parser.add_argument(
+        'search_text', nargs='?',
+        help="Text or pattern to search for in file names. Omit to list all "
+             "files."
+    )
     parser.add_argument('-i', '--ignore-case', action='store_true')
     parser.add_argument('-g', '--glob', action='store_true')
+    parser.add_argument('-j', '--json', action='store_true')
     
     args = parser.parse_args()
     
+    if args.search_text:
+        search_text = d_cl(args.search_text)
+    else:
+        search_text = None
+    
     main(
         d_cl(args.search_path),
-        d_cl(args.search_text),
+        search_text,
         case_sensitive=args.ignore_case,
-        glob=args.glob
+        glob=args.glob,
+        json=args.json
         )
