@@ -256,6 +256,9 @@ class ArchiveWalker(object):
         # is an archive, we get access to the data as a buffer and recurse into
         # it.
         for member in members:
+            # Although it's not documented, ZIP file paths are always '/'
+            # separated, and directories end in a '/'. So this works for both
+            # kinds of archive.
             member_path = Path.posix(self.membername(member).decode(self.ENCODING))
             # This keeps track of our location in the filesystem and any
             # archives we're already nested inside.
@@ -363,9 +366,14 @@ class ZipWalker(ArchiveWalker):
         return member.filename
     
     def extract(self, member):
+        # Unfortunately, ZipFile extraction is not as seamless as it is for
+        # TarFile objects. We need to read the file into memory and operate on
+        # that buffer, otherwise the extracted file shares a file pointer with
+        # the original archive.
         return StringIO(self.archive.read(member))
 
     def isfile(self, member):
+        # Files won't have a trailing '/'
         return not member.filename.endswith('/')
 
 
