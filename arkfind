@@ -193,7 +193,7 @@ class DirectoryWalker(object):
                     # Generate the zipfile contents too
                     try:
                         yield ZipWalker.from_path(fpath)
-                    except zipfile.BadZipFile:
+                    except zipfile.BadZipfile:
                         # Keep going on exceptions, but warn the user.
                         logging.warning(
                             "Could not open: %s" % concat_paths((fpath,))
@@ -307,7 +307,7 @@ class ArchiveWalker(object):
                                     inner_file,
                                     nested_paths
                                 ).contents)
-                        except zipfile.BadZipFile as zferr:
+                        except zipfile.BadZipfile as zferr:
                             # Keep going on exceptions, but warn the user.
                             logging.warning(
                                 "Could not open: %s" % concat_paths(nested_paths)
@@ -404,7 +404,7 @@ class ZipWalker(object):
                                     inner_file,
                                     nested_paths
                                 ).contents)
-                        except zipfile.BadZipFile as zferr:
+                        except zipfile.BadZipfile as zferr:
                             # Keep going on exceptions, but warn the user.
                             logging.warning("Could not open: %s" % path.joined)
 
@@ -525,10 +525,19 @@ def archive_search(base_path, search_func, reporter):
     """
     base_path_kind = magic.from_file(base_path.joined, mime=True)
     base_path_class = SEARCH_BASES.get(base_path_kind, DEFAULT_SEARCH_BASE)
+        
+    try:
+        base_walker = base_path_class(base_path)
+    except (tarfile.ReadError, zipfile.BadZipfile):
+        # We can't do anything here - warn the user and exit
+        logging.warning(
+            "Could not open: %s" % concat_paths((base_path,))
+        )
+        return
+    
+    to_process = deque((base_walker,))
     
     # Iterate over a stack of discovered files, filtering as we go
-    to_process = deque((base_path_class(base_path),))
-    
     with reporter() as report_func:
         while to_process:
             node = to_process.pop()
