@@ -14,11 +14,14 @@ from contextlib import closing, contextmanager
 from cStringIO import StringIO
 from fnmatch import fnmatchcase
 import json
+import logging
 from os import walk
 import os.path
 import posixpath
 import sys
+import tarfile
 from tarfile import TarFile
+import zipfile
 from zipfile import ZipFile
 
 import magic
@@ -113,6 +116,10 @@ class Path(object):
         """ Indexing works on the sequence of path components. """
         return self.paths[key]
 
+def concat_paths(paths):
+    """ Display paths in a compact form for error messages. """
+    return ':'.join(p.joined for p in paths)
+
 
 # The NamedNode, DirectoryWalker and ArchiveWalker objects all have a "contents"
 # member that is iterated over to list ALL files contained within them. The
@@ -175,10 +182,22 @@ class DirectoryWalker(object):
                 
                 if archive_mode:
                     # Generate the archive contents too
-                    yield ArchiveWalker.from_path(fpath, archive_mode)
+                    try:
+                        yield ArchiveWalker.from_path(fpath, archive_mode)
+                    except tarfile.ReadError:
+                        # Keep going on exceptions, but warn the user.
+                        logging.warning(
+                            "Could not open: %s" % concat_paths((fpath,))
+                        )                        
                 elif zipfile:
                     # Generate the zipfile contents too
-                    yield ZipWalker.from_path(fpath)
+                    try:
+                        yield ZipWalker.from_path(fpath)
+                    except zipfile.BadZipFile:
+                        # Keep going on exceptions, but warn the user.
+                        logging.warning(
+                            "Could not open: %s" % concat_paths((fpath,))
+                        )
             
             # The directories don't need special treatment
             for dname in dirnames:
@@ -217,6 +236,7 @@ class ArchiveWalker(object):
                 encoding=TARFILE_ENCODING
                 ) as tfobj:
             return cls(tfobj, paths)
+            
     
     def __init__(self, tarfile, paths):
         """ Given an already open archive (a tarfile.TarFile object),
@@ -268,18 +288,30 @@ class ArchiveWalker(object):
                     # If it's an archive, create another ArchiveWalker instance
                     # from the extracted buffer
                     if archive_mode:
-                        self.contents.extend(
-                            ArchiveWalker.from_buffer(
-                                inner_file,
-                                nested_paths,
-                                archive_mode
-                            ).contents)
+                        try:
+                            self.contents.extend(
+                                ArchiveWalker.from_buffer(
+                                    inner_file,
+                                    nested_paths,
+                                    archive_mode
+                                ).contents)
+                        except tarfile.ReadError as tferr:
+                            # Keep going on exceptions, but warn the user.
+                            logging.warning(
+                                "Could not open: %s" % concat_paths(nested_paths)
+                            )
                     elif zipfile:
-                        self.contents.extend(
-                            ZipWalker.from_buffer(
-                                inner_file,
-                                nested_paths
-                            ).contents)
+                        try:
+                            self.contents.extend(
+                                ZipWalker.from_buffer(
+                                    inner_file,
+                                    nested_paths
+                                ).contents)
+                        except zipfile.BadZipFile as zferr:
+                            # Keep going on exceptions, but warn the user.
+                            logging.warning(
+                                "Could not open: %s" % concat_paths(nested_paths)
+                            )
 
 
 class ZipWalker(object):
@@ -355,18 +387,26 @@ class ZipWalker(object):
                     zipfile = inner_mime_type in ZIP_MIME_TYPES
                     
                     if archive_mode:
-                        self.contents.extend(
-                            ArchiveWalker.from_buffer(
-                                inner_file,
-                                nested_paths,
-                                archive_mode
-                            ).contents)
+                        try:
+                            self.contents.extend(
+                                ArchiveWalker.from_buffer(
+                                    inner_file,
+                                    nested_paths,
+                                    archive_mode
+                                ).contents)
+                        except tarfile.ReadError as tferr:
+                            # Keep going on exceptions, but warn the user.
+                            logging.warning("Could not open: %s" % path.joined)
                     elif zipfile:
-                        self.contents.extend(
-                            ZipWalker.from_buffer(
-                                inner_file,
-                                nested_paths
-                            ).contents)
+                        try:
+                            self.contents.extend(
+                                ZipWalker.from_buffer(
+                                    inner_file,
+                                    nested_paths
+                                ).contents)
+                        except zipfile.BadZipFile as zferr:
+                            # Keep going on exceptions, but warn the user.
+                            logging.warning("Could not open: %s" % path.joined)
 
 
 # The following classes deal with filtering the results from a file search.
@@ -521,6 +561,12 @@ def main(base_path, search_text=None, case_sensitive=False, glob=False, json=Fal
     
 
 if __name__ == '__main__':
+    # Prepare the logging format for command-line use
+    logging.basicConfig(
+        format='%(levelname)s %(message)s',
+        level=logging.WARNING    
+    )
+    
     # Get the incoming CLI arguments into shape for the rest of the script by
     # parsing and decoding them.    
     parser = argparse.ArgumentParser(
