@@ -35,17 +35,6 @@ PROG_TEXT = (
 # Leading text for results
 RESULT_INDENT = "  > "
 
-# By default, the tarfile module will decode entries in a PAX-format archive and
-# then re-encode them based on the current system. It would be better if we
-# could just get the unicode sequence in the first place, but since we can't
-# we'll just force it to re-encode to UTF-8 instead, and then decode it again
-# when we need to.
-TARFILE_ENCODING = 'utf8'
-
-# Mystery! There is no official zipfile encoding, and the archive format doesn't
-# contain it. The Python docs say that WinZip guesses CP-437, so let's use that!
-ZIPFILE_ENCODING = 'cp437'
-
 # What encoding should we use to interpret command line arguments? Who knows! If
 # we get bytes off the command line, it could be sys.stdin.encoding. Or hey,
 # maybe it's locale.getpreferredencoding()! Although if we're invoked from
@@ -78,11 +67,6 @@ def d_fs(some_bytes):
     """ At least when the string comes from the filesystem we know what to do...
     """
     return some_bytes.decode(sys.getfilesystemencoding())
-
-
-def d_tr(some_bytes):
-    """ And here, we can take complete control! """
-    return some_bytes.decode(TARFILE_ENCODING)
 
 
 class Path(object):
@@ -178,18 +162,18 @@ class DirectoryWalker(object):
                 # Inspect it to see if it's an archive
                 mime_type = magic.from_file(fpath.joined, mime=True)
                 archive_mode = TAR_MIME_TYPES.get(mime_type, None)
-                zipfile = mime_type in ZIP_MIME_TYPES
+                is_zipfile = mime_type in ZIP_MIME_TYPES
                 
                 if archive_mode:
                     # Generate the archive contents too
                     try:
-                        yield ArchiveWalker.from_path(fpath, archive_mode)
+                        yield TarWalker.from_path(fpath, archive_mode)
                     except tarfile.ReadError:
                         # Keep going on exceptions, but warn the user.
                         logging.warning(
                             "Could not open: %s" % concat_paths((fpath,))
                         )                        
-                elif zipfile:
+                elif is_zipfile:
                     # Generate the zipfile contents too
                     try:
                         yield ZipWalker.from_path(fpath)
@@ -209,6 +193,22 @@ class ArchiveWalker(object):
     inspecting any nested archives for more files. Note that unlike the
     DirectoryWalker, an ArchiveWalker will populate its results as soon as it is
     created (ie. it does not act as a generator).
+    
+    This class should not be used directly - there are subclasses for TAR and
+    ZIP files that should be used.
+    
+    Subclasses should have:
+    
+    Class methods: "open_path" and "open_buffer" that return context managers
+    for open archives
+    
+    Methods:
+    "getmembers" - list the members of the archive in whatever format is
+      reasonable
+    
+    "extract" - extract buffered data for the given member
+    
+    "isfile" - return True if the given member is a file    
     """
     
     @classmethod
@@ -217,35 +217,28 @@ class ArchiveWalker(object):
         recursively lists the files inside (including any inside nested
         archives).
         """
-        with TarFile.open(
-                path.joined, *args,
-                encoding=TARFILE_ENCODING, **kargs
-                ) as tfobj:
-            return cls(tfobj, (path,))
+        with cls.open_path(path, *args, **kargs) as archive:
+            return cls(archive, (path,))
      
     @classmethod
-    def from_buffer(cls, buf, paths, mode):
+    def from_buffer(cls, buf, paths, *args, **kargs):
         """ Takes an already open buffer of archive data, and recursively lists
         the files inside (including any inside nested archives). The caller is
         responsible for closing the buffer. The buffer's position will be
         changed in this function.
         """
         buf.seek(0)
-        with TarFile.open(
-                fileobj=buf, mode=mode,
-                encoding=TARFILE_ENCODING
-                ) as tfobj:
-            return cls(tfobj, paths)
-            
+        with cls.open_buffer(buf, *args, **kargs) as archive:
+            return cls(archive, paths)
     
-    def __init__(self, tarfile, paths):
-        """ Given an already open archive (a tarfile.TarFile object),
-        recursively list the contents, including files inside archives contained
-        in this one. The "paths" argument specifies the location of this archive
-        in the filesystem or nested inside other archives. It is the caller's
+    def __init__(self, archive, paths):
+        """ Given an already open archive file, create a recurive list of the
+        contents, including files inside archives contained in this one. The
+        "paths" argument specifies the location of this archive in the
+        filesystem or nested inside other archives. It is the caller's
         responsibility to close the archive.
         """
-        self.tf = tarfile
+        self.archive = archive
         self.paths = paths
         self.contents = deque()
         self._populate()
@@ -255,23 +248,23 @@ class ArchiveWalker(object):
         is better to do it all at once so the file is not kept open for too
         long.
         """
-        tfcontents = self.tf.getmembers()
+        members = self.getmembers()
         
         # This is a similar approach to that in DirectoryWalker, but the
         # getmembers() function returns a flat list rather than the recursive
         # structure of os.walk. We list each file and directory, and if a file
         # is an archive, we get access to the data as a buffer and recurse into
         # it.
-        for member in tfcontents:
-            member_path = Path.posix(member.name.decode(TARFILE_ENCODING))
+        for member in members:
+            member_path = Path.posix(self.membername(member).decode(self.ENCODING))
             # This keeps track of our location in the filesystem and any
             # archives we're already nested inside.
             nested_paths = self.paths + (member_path,)
             self.contents.append(NamedNode(nested_paths))
             
             # Inspect files to see if they're archives
-            if member.isfile():
-                with closing(self.tf.extractfile(member)) as inner_file:
+            if self.isfile(member):
+                with closing(self.extract(member)) as inner_file:
                     magic_bytes = inner_file.read(MAGIC_BYTES_N)
                     inner_mime_type = magic.from_buffer(
                         magic_bytes,
@@ -283,14 +276,14 @@ class ArchiveWalker(object):
                         None
                     )
                     
-                    zipfile = inner_mime_type in ZIP_MIME_TYPES
+                    is_zipfile = inner_mime_type in ZIP_MIME_TYPES
 
                     # If it's an archive, create another ArchiveWalker instance
                     # from the extracted buffer
                     if archive_mode:
                         try:
                             self.contents.extend(
-                                ArchiveWalker.from_buffer(
+                                TarWalker.from_buffer(
                                     inner_file,
                                     nested_paths,
                                     archive_mode
@@ -300,7 +293,7 @@ class ArchiveWalker(object):
                             logging.warning(
                                 "Could not open: %s" % concat_paths(nested_paths)
                             )
-                    elif zipfile:
+                    elif is_zipfile:
                         try:
                             self.contents.extend(
                                 ZipWalker.from_buffer(
@@ -314,99 +307,66 @@ class ArchiveWalker(object):
                             )
 
 
-class ZipWalker(object):
-    """ Recursively searches the given zipfile, listing the contents and
-    inspecting any nested archives for more files. Like the ArchiveWalker, a
-    ZipWalker will populate its results as soon as it is created (ie. it does
-    not act as a generator).
+class TarWalker(ArchiveWalker):
+    """ Recursively inspects the contents of TAR archives (including gz or bz2
+    compressed archives).
     """
+    
+    # By default, the tarfile module will decode entries in a PAX-format archive
+    # and then re-encode them based on the current system. It would be better if
+    # we could just get the unicode sequence in the first place, but since we
+    # can't we'll just force it to re-encode to UTF-8 instead, and then decode
+    # it again when we need to.
+    ENCODING = 'utf8'
+    
+    @classmethod
+    def open_path(cls, path, mode):
+        return TarFile.open(path.joined, mode=mode, encoding=TarWalker.ENCODING)
 
     @classmethod
-    def from_path(cls, path):
-        """ Takes a Path object denoting a zipfile in the filesystem, and
-        recursively lists the files inside (including any inside nested
-        archives).
-        """
-        with ZipFile(path.joined, 'r') as zfobj:
-            return cls(zfobj, (path,))
-        
+    def open_buffer(cls, buf, mode):
+        return TarFile.open(fileobj=buf, mode=mode, encoding=TarWalker.ENCODING)
+
+    def getmembers(self):
+        return self.archive.getmembers()
+    
+    def membername(self, member):
+        return member.name
+    
+    def extract(self, member):
+        return self.archive.extractfile(member)
+
+    def isfile(self, member):
+        return member.isfile()
+
+
+class ZipWalker(ArchiveWalker):
+    """ Recursively inspects the contents of ZIP archives. """    
+    
+    # Mystery! There is no official zipfile encoding, and the archive format
+    # doesn't contain it. The Python docs say that WinZip guesses CP-437, so
+    # let's use that!
+    ENCODING = 'cp437'
+    
     @classmethod
-    def from_buffer(cls, buf, paths):
-        """ Takes an already open buffer of zipfile data, and recursively lists
-        the files inside (including any inside nested archives). The caller is
-        responsible for closing the buffer. The buffer's position will be
-        changed in this function.
-        """
-        buf.seek(0)
-        with ZipFile(buf, 'r') as zfobj:
-            return cls(zfobj, paths)
+    def open_path(cls, path):
+        return ZipFile(path.joined, 'r')
 
-    def __init__(self, zipfile, paths):
-        """ Given an already open archive (a zipfile.ZipFile object),
-        recursively list the contents, including files inside archives contained
-        in this one. The "paths" argument specifies the location of this archive
-        in the filesystem or nested inside other archives. It is the caller's
-        responsibility to close the archive.
-        """
-        self.zf = zipfile
-        self.paths = paths
-        self.contents = deque()
-        self._populate()
+    @classmethod
+    def open_buffer(cls, buf):
+        return ZipFile(buf, 'r')
 
-    def _populate(self):
-        """ Populates the "contents" member with the recursively found files. It
-        is better to do it all at once so the file is not kept open for too
-        long.
-        """
-        zfcontents = self.zf.infolist()
-        
-        for member in zfcontents:
-            # Although it's not documented, ZIP file paths are always '/'
-            # separated, and directories end in a '/'
-            member_path = Path.posix(member.filename.decode(ZIPFILE_ENCODING))
-            nested_paths = self.paths + (member_path,)
-            self.contents.append(NamedNode(nested_paths))
-            
-            # Files won't have a trailing '/'
-            if not member.filename.endswith('/'):
-                # Unfortunately, ZipFile extraction is not as seamless as it is
-                # for TarFile objects. We need to read the file into memory and
-                # operate on that buffer.
-                with closing(StringIO(self.zf.read(member))) as inner_file:
-                    magic_bytes = inner_file.read(MAGIC_BYTES_N)
-                    inner_mime_type = magic.from_buffer(
-                        magic_bytes,
-                        mime=True
-                    )
-                    
-                    archive_mode = TAR_MIME_TYPES.get(
-                        inner_mime_type,
-                        None
-                    )
-                    
-                    zipfile = inner_mime_type in ZIP_MIME_TYPES
-                    
-                    if archive_mode:
-                        try:
-                            self.contents.extend(
-                                ArchiveWalker.from_buffer(
-                                    inner_file,
-                                    nested_paths,
-                                    archive_mode
-                                ).contents)
-                        except tarfile.ReadError as tferr:
-                            # Keep going on exceptions, but warn the user.
-                            logging.warning("Could not open: %s" % path.joined)
-                    elif zipfile:
-                        try:
-                            self.contents.extend(
-                                ZipWalker.from_buffer(
-                                    inner_file,
-                                    nested_paths
-                                ).contents)
-                        except zipfile.BadZipfile as zferr:
-                            # Keep going on exceptions, but warn the user.
-                            logging.warning("Could not open: %s" % path.joined)
+    def getmembers(self):
+        return self.archive.infolist()
+    
+    def membername(self, member):
+        return member.filename
+    
+    def extract(self, member):
+        return StringIO(self.archive.read(member))
+
+    def isfile(self, member):
+        return not member.filename.endswith('/')
 
 
 # The following classes deal with filtering the results from a file search.
@@ -504,9 +464,9 @@ def json_reporter():
 # Our script needs a starting point, and that could be a directory OR an
 # archive. This dict matches up the MIME type to the appropriate constructor.
 SEARCH_BASES = {
-    'application/x-bzip2' : ArchiveWalker.from_path,
-    'application/x-gzip'  : ArchiveWalker.from_path,
-    'application/x-tar'   : ArchiveWalker.from_path,
+    'application/x-bzip2' : TarWalker.from_path,
+    'application/x-gzip'  : TarWalker.from_path,
+    'application/x-tar'   : TarWalker.from_path,
     'application/zip'     : ZipWalker.from_path,
     'inode/directory'     : DirectoryWalker
 }
