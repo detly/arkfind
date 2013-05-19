@@ -247,22 +247,16 @@ class ArchiveWalker(object):
         """ Populates the "contents" member with the recursively found files. It
         is better to do it all at once so the file is not kept open for too
         long.
-        """
-        members = self.getmembers()
-        
+        """        
         # This is a similar approach to that in DirectoryWalker, but the
         # getmembers() function returns a flat list rather than the recursive
         # structure of os.walk. We list each file and directory, and if a file
         # is an archive, we get access to the data as a buffer and recurse into
         # it.
-        for member in members:
-            # Although it's not documented, ZIP file paths are always '/'
-            # separated, and directories end in a '/'. So this works for both
-            # kinds of archive.
-            member_path = Path.posix(self.membername(member).decode(self.ENCODING))
+        for member in self.getmembers():           
             # This keeps track of our location in the filesystem and any
             # archives we're already nested inside.
-            nested_paths = self.paths + (member_path,)
+            nested_paths = self.paths + (self.member_path(member),)
             self.contents.append(NamedNode(nested_paths))
             
             # Inspect files to see if they're archives
@@ -333,8 +327,8 @@ class TarWalker(ArchiveWalker):
     def getmembers(self):
         return self.archive.getmembers()
     
-    def membername(self, member):
-        return member.name
+    def member_path(self, member):
+        return Path.posix(member.name.decode(self.ENCODING))
     
     def extract(self, member):
         return self.archive.extractfile(member)
@@ -362,8 +356,10 @@ class ZipWalker(ArchiveWalker):
     def getmembers(self):
         return self.archive.infolist()
     
-    def membername(self, member):
-        return member.filename
+    def member_path(self, member):
+        # Although it's not documented, ZIP file paths are always '/' separated,
+        # and directories end in a '/'. So this works for both kinds of archive.
+        return Path.posix(member.filename.decode(self.ENCODING))
     
     def extract(self, member):
         # Unfortunately, ZipFile extraction is not as seamless as it is for
