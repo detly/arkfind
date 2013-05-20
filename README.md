@@ -9,10 +9,10 @@ you've ended up with TAR files inside ZIP files, and there are many such ZIP
 files all inside one big TAR.BZ2 file. You want to find a file called
 "magic.txt", so you use the script like so:
 
-  $ arkfind AllBackups.tar.bz2 "magic.txt"
-  AllBackups.tar.bz2
-    > backups_2006/lab_pc/MISC.zip
-        > misc_lab_stuff/magic.txt
+    $ arkfind AllBackups.tar.bz2 "magic.txt"
+    AllBackups.tar.bz2
+      > backups_2006/lab_pc/MISC.zip
+          > misc_lab_stuff/magic.txt
         
 Supported archives are: TAR, TAR.GZ, TAR.BZ2 and ZIP. There are options for case
 sensitivity, glob-style pattern matching and JSON output. Non-ASCII character
