@@ -21,6 +21,7 @@ import posixpath
 import sys
 import tarfile
 from tarfile import TarFile
+import traceback
 import zipfile
 from zipfile import ZipFile
 
@@ -535,13 +536,7 @@ def main(base_path, search_text=None, case_sensitive=False, glob=False, json=Fal
     archive_search(Path.os(base_path), search_func, reporter)
     
 
-if __name__ == '__main__':
-    # Prepare the logging format for command-line use
-    logging.basicConfig(
-        format='%(levelname)s %(message)s',
-        level=logging.WARNING    
-    )
-    
+if __name__ == '__main__':    
     # Get the incoming CLI arguments into shape for the rest of the script by
     # parsing and decoding them.    
     parser = argparse.ArgumentParser(
@@ -556,6 +551,7 @@ if __name__ == '__main__':
     parser.add_argument('-i', '--ignore-case', action='store_true')
     parser.add_argument('-g', '--glob', action='store_true')
     parser.add_argument('-j', '--json', action='store_true')
+    parser.add_argument('-q', '--quiet', action='store_true')
     
     args = parser.parse_args()
     
@@ -563,6 +559,17 @@ if __name__ == '__main__':
         search_text = d_cl(args.search_text)
     else:
         search_text = None
+    
+    if args.quiet:
+        log_level = logging.ERROR
+    else:
+        log_level = logging.WARNING
+    
+    # Prepare the logging format for command-line use
+    logging.basicConfig(
+        format='%(levelname)s %(message)s',
+        level=log_level
+    )
     
     main(
         d_cl(args.search_path),
