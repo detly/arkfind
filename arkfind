@@ -160,8 +160,15 @@ class DirectoryWalker(object):
                 yield NamedNode.single(fpath)
                 
                 # Inspect it to see if it's an archive
-                mime_type = magic.from_file(fpath.joined, mime=True)
-                archive_mode = TAR_MIME_TYPES.get(mime_type, None)
+                try:
+                    mime_type = magic.from_file(fpath.joined, mime=True)
+                    archive_mode = TAR_MIME_TYPES.get(mime_type, None)
+                except IOError:
+                    logging.warning(
+                        "Could not open: %s" % concat_paths((fpath,))
+                    )
+                    archive_mode = None
+                
                 is_zipfile = mime_type in ZIP_MIME_TYPES
                 
                 if archive_mode:
