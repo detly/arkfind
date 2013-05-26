@@ -18,14 +18,19 @@ import logging
 from os import walk
 import os.path
 import posixpath
+import signal
 import sys
 import tarfile
 from tarfile import TarFile
-import traceback
 import zipfile
 from zipfile import ZipFile
 
 import magic
+
+# Interrupt signal (Ctrl+C) handler
+def interrupt_handler(signum, stack_frame):
+    print "Interrupted"
+    sys.exit(1)
 
 # Help text for command-line invocation
 PROG_TEXT = (
@@ -536,7 +541,10 @@ def main(base_path, search_text=None, case_sensitive=False, glob=False, json=Fal
     archive_search(Path.os(base_path), search_func, reporter)
     
 
-if __name__ == '__main__':    
+if __name__ == '__main__':
+    # Exit cleanly on Ctrl+C
+    signal.signal(signal.SIGINT, interrupt_handler)    
+    
     # Get the incoming CLI arguments into shape for the rest of the script by
     # parsing and decoding them.    
     parser = argparse.ArgumentParser(
