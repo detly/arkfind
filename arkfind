@@ -62,13 +62,6 @@ def d_cl(some_bytes):
     """ See snarky note for CLI_ENCODING. """
     return some_bytes.decode(CLI_ENCODING)
 
-
-def d_fs(some_bytes):
-    """ At least when the string comes from the filesystem we know what to do...
-    """
-    return some_bytes.decode(sys.getfilesystemencoding())
-
-
 class Path(object):
     """ Depending on whether we're searching or presenting results, we'll need
     to access both the split and joined forms of filesystem/archive paths. This
@@ -154,14 +147,14 @@ class DirectoryWalker(object):
             # For every file, we return both the file itself as a result, but
             # also inspect it to see if it's an archive.
             for fname in filenames:
-                fpath = Path.os(d_fs(os.path.join(dirpath, fname)))
+                fpath = Path.os(os.path.join(dirpath, fname))
                 
                 # The file itself
                 yield NamedNode.single(fpath)
                 
                 # Inspect it to see if it's an archive
                 try:
-                    mime_type = magic.from_file(fpath.joined, mime=True)
+                    mime_type = magic.from_file(fpath.joined.encode(sys.getfilesystemencoding()), mime=True)
                     archive_mode = TAR_MIME_TYPES.get(mime_type, None)
                 except IOError:
                     logging.warning(
@@ -192,7 +185,7 @@ class DirectoryWalker(object):
             
             # The directories don't need special treatment
             for dname in dirnames:
-                yield NamedNode.single(Path.os(d_fs(os.path.join(dirpath, dname))))
+                yield NamedNode.single(Path.os(os.path.join(dirpath, dname)))
 
 
 class ArchiveWalker(object):
@@ -496,7 +489,7 @@ def archive_search(base_path, search_func, reporter):
     a sequence of Path objects and return a boolean if the path is a valid
     result.
     """
-    base_path_kind = magic.from_file(base_path.joined, mime=True)
+    base_path_kind = magic.from_file(base_path.joined.encode(sys.getfilesystemencoding()), mime=True)
     base_path_class = SEARCH_BASES.get(base_path_kind, DEFAULT_SEARCH_BASE)
         
     try:
