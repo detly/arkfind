@@ -60,12 +60,10 @@ TAR_MIME_TYPES = {
 
 ZIP_MIME_TYPES = ('application/zip', )
 
-# This script follows the philosohpy of "encode data coming in, do internal
-# processing on unicode sequence objects, encode data going out". The following
-# are decoding/encoding utility functions.
-
 def d_cl(some_bytes):
-    """ See snarky note for CLI_ENCODING. """
+    """ Decode bytes coming in from the command-line. See snarky note for
+    CLI_ENCODING.
+    """
     return some_bytes.decode(CLI_ENCODING)
 
 class Path(object):
@@ -161,13 +159,13 @@ class DirectoryWalker(object):
                 # Inspect it to see if it's an archive
                 try:
                     mime_type = magic.from_file(fpath.joined.encode(sys.getfilesystemencoding()), mime=True)
-                    archive_mode = TAR_MIME_TYPES.get(mime_type, None)
                 except IOError:
                     logging.warning(
-                        "Could not open: %s" % concat_paths((fpath,))
+                        "I/O error on %s (%s)" % (concat_paths((fpath,)), ex.strerror)
                     )
-                    archive_mode = None
+                    mime_type = None
                 
+                archive_mode = TAR_MIME_TYPES.get(mime_type, None)
                 is_zipfile = mime_type in ZIP_MIME_TYPES
                 
                 if archive_mode:
@@ -249,7 +247,12 @@ class ArchiveWalker(object):
         self.archive = archive
         self.paths = paths
         self.contents = deque()
-        self._populate()
+        try:
+            self._populate()
+        except IOError, ex:
+            logging.warning(
+                "I/O error on %s (%s)" % (concat_paths((fpath,)), ex.strerror)
+            )
         
     def _populate(self):
         """ Populates the "contents" member with the recursively found files. It
@@ -260,7 +263,7 @@ class ArchiveWalker(object):
         # get_members() function returns a flat list rather than the recursive
         # structure of os.walk. We list each file and directory, and if a file
         # is an archive, we get access to the data as a buffer and recurse into
-        # it.
+        # it.        
         for member in self.get_members():           
             # This keeps track of our location in the filesystem and any
             # archives we're already nested inside.
@@ -324,8 +327,10 @@ class TarWalker(ArchiveWalker):
     # it again when we need to.
     ENCODING = 'utf8'
     
+    # The following methods are mostly a wrapper around TarFile
+    
     @classmethod
-    def open_path(cls, path, mode):
+    def open_path(cls, path, mode='r:*'):
         return TarFile.open(path.joined, mode=mode, encoding=TarWalker.ENCODING)
 
     @classmethod
@@ -352,6 +357,8 @@ class ZipWalker(ArchiveWalker):
     # doesn't contain it. The Python docs say that WinZip guesses CP-437, so
     # let's use that!
     ENCODING = 'cp437'
+    
+    # ZipFile is a little trickier than TarFile, but still fairly simple
     
     @classmethod
     def open_path(cls, path):
