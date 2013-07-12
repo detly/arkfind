@@ -40,7 +40,7 @@ use the script like so:
 Maybe you have a directory full of such archives, and you can't remember the
 whole name of the file. You can do this:
 
-    $ arkfind backups/ "magic*.txt"
+    $ arkfind -g backups/ "magic*.txt"
     backups/backup_2007.zip
       > 06/magic_june_2007.rtf
     backups/backup_2008.zip
