@@ -4,11 +4,12 @@ arkfind
 A utility to recursively search for files by name in a filesystem, also looking
 inside archives to an arbitary depth.
 
-Supported archives are: TAR, TAR.GZ, TAR.BZ2 and ZIP. There are options for case
-sensitivity, glob-style pattern matching and JSON output. Non-ASCII character
-sets should be supported, although there may be some issues with command line
-encodings if they aren't UTF-8 (and there's also the fact that ZIP files don't
-have a universally accepted encoding).
+Supported archives are: TAR, TAR.GZ, TAR.BZ2 and ZIP. It should also work on
+ZIP-like archives such as JAR files. There are options for case sensitivity,
+glob-style pattern matching and JSON output. Non-ASCII character sets should be
+supported, although there may be some issues with command line encodings if they
+aren't UTF-8 (and there's also the fact that ZIP files don't have a universally
+accepted encoding).
 
 The script uses the "magic" library to determine file types, so it doesn't rely
 on file extensions to identify archives.
