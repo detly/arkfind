@@ -24,6 +24,7 @@ import tarfile
 from tarfile import TarFile
 import zipfile
 from zipfile import ZipFile
+import zlib
 
 import magic
 
@@ -159,7 +160,7 @@ class DirectoryWalker(object):
                 # Inspect it to see if it's an archive
                 try:
                     mime_type = magic.from_file(fpath.joined.encode(sys.getfilesystemencoding()), mime=True)
-                except IOError:
+                except IOError as ex:
                     logging.warning(
                         "I/O error on %s (%s)" % (concat_paths((fpath,)), ex.strerror)
                     )
@@ -251,7 +252,7 @@ class ArchiveWalker(object):
             self._populate()
         except IOError, ex:
             logging.warning(
-                "I/O error on %s (%s)" % (concat_paths((fpath,)), ex.strerror)
+                "I/O error on %s (%s)" % (concat_paths(self.paths), ex.strerror)
             )
         
     def _populate(self):
@@ -308,7 +309,7 @@ class ArchiveWalker(object):
                                     inner_file,
                                     nested_paths
                                 ).contents)
-                        except zipfile.BadZipfile as zferr:
+                        except (zipfile.BadZipfile, zlib.error) as zferr:
                             # Keep going on exceptions, but warn the user.
                             logging.warning(
                                 "Could not open: %s" % concat_paths(nested_paths)
