@@ -250,7 +250,7 @@ class ArchiveWalker(object):
         self.contents = deque()
         try:
             self._populate()
-        except IOError, ex:
+        except IOError as ex:
             logging.warning(
                 "I/O error on %s (%s)" % (concat_paths(self.paths), ex.strerror)
             )
