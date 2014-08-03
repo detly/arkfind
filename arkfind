@@ -73,27 +73,27 @@ class Path(object):
     class does the conversion once and keeps both forms so we don't keep
     converting back and forth.
     """
-    
+
     @classmethod
     def os(cls, path):
         """ Split a path obtained from OS-related functions. Expects a unicode
         sequence. """
         normed = os.path.normpath(path)
         return cls(os.path.split(normed), normed)
-    
+
     @classmethod
     def posix(cls, path):
         """ Splits a path that's known to be in POSIX '/'-separated form.
         Expects a unicode sequence. """
         normed = posixpath.normpath(path)
         return cls(posixpath.split(normed), normed)
-    
+
     def __init__(self, paths, joined):
         """ Stores both the split and joined forms of a path. Expects a unicode
         sequence. """
         self.paths = paths
         self.joined = joined
-        
+
     def __getitem__(self, key):
         """ Indexing works on the sequence of path components. """
         return self.paths[key]
@@ -110,20 +110,20 @@ def concat_paths(paths):
 class NamedNode(object):
     """ Represents a file, whether a normal file or directory or one nested
     inside an archive. The file is denoted by a series of Path objects.
-    
+
     Files that are directly in the file system have a single entry. Files that
     are nested inside archives have multiple paths (the first is the archive,
     the second is a nested archive, the (N-1)th is the archive containing the
     file, the Nth is the file itself).
-    
+
     NamedNode objects have an empty "contents" member.
     """
-    
+
     @classmethod
     def single(cls, path):
         """ Create a NamedNode from a single Path object. """
         return cls((path,))
-    
+
     def __init__(self, paths):
         """ Create a NamedNode from a sequence of Path objects. """
         self.paths = paths
@@ -132,9 +132,9 @@ class NamedNode(object):
 
 class DirectoryWalker(object):
     """ Recurses through a filesystem starting at a given directory, looking for
-    files in the filesystem itself and any archives it encounters.    
+    files in the filesystem itself and any archives it encounters.
     """
-    
+
     def __init__(self, path):
         """ Creates the directory walker starting at the given directory. The
         list of found files/directories/etc is not populated immediately, but is
@@ -153,10 +153,10 @@ class DirectoryWalker(object):
             # also inspect it to see if it's an archive.
             for fname in filenames:
                 fpath = Path.os(os.path.join(dirpath, fname))
-                
+
                 # The file itself
                 yield NamedNode.single(fpath)
-                
+
                 # Inspect it to see if it's an archive
                 try:
                     mime_type = magic.from_file(fpath.joined.encode(sys.getfilesystemencoding()), mime=True)
@@ -165,10 +165,10 @@ class DirectoryWalker(object):
                         "I/O error on %s (%s)" % (concat_paths((fpath,)), ex.strerror)
                     )
                     mime_type = None
-                
+
                 archive_mode = TAR_MIME_TYPES.get(mime_type, None)
                 is_zipfile = mime_type in ZIP_MIME_TYPES
-                
+
                 if archive_mode:
                     # Generate the archive contents too
                     try:
@@ -177,7 +177,7 @@ class DirectoryWalker(object):
                         # Keep going on exceptions, but warn the user.
                         logging.warning(
                             "Could not open: %s" % concat_paths((fpath,))
-                        )                        
+                        )
                 elif is_zipfile:
                     # Generate the zipfile contents too
                     try:
@@ -187,7 +187,7 @@ class DirectoryWalker(object):
                         logging.warning(
                             "Could not open: %s" % concat_paths((fpath,))
                         )
-            
+
             # The directories don't need special treatment
             for dname in dirnames:
                 yield NamedNode.single(Path.os(os.path.join(dirpath, dname)))
@@ -198,26 +198,28 @@ class ArchiveWalker(object):
     inspecting any nested archives for more files. Note that unlike the
     DirectoryWalker, an ArchiveWalker will populate its results as soon as it is
     created (ie. it does not act as a generator).
-    
+
     This class should not be used directly - there are subclasses for TAR and
     ZIP files that should be used.
-    
+
     Subclasses should have:
-    
+
     Class methods: "open_path" and "open_buffer" that return context managers
     for open archives
-    
+
     Methods:
     "get_members" - list the members of the archive in whatever format is
       reasonable
-    
+
     "member_path" - construct an encoded path for the given member
-    
+
     "extract" - extract buffered data for the given member
-    
-    "isfile" - return True if the given member is a file    
+
+    "could_be_archive" - return True if the given member is a file that could
+      potentially be a nested archive. Normally this just means it's an entry
+      for a file and not a directory.
     """
-    
+
     @classmethod
     def from_path(cls, path, *args, **kargs):
         """ Takes a Path object denoting an archive in the filesystem, and
@@ -226,7 +228,7 @@ class ArchiveWalker(object):
         """
         with cls.open_path(path, *args, **kargs) as archive:
             return cls(archive, (path,))
-     
+
     @classmethod
     def from_buffer(cls, buf, paths, *args, **kargs):
         """ Takes an already open buffer of archive data, and recursively lists
@@ -237,7 +239,7 @@ class ArchiveWalker(object):
         buf.seek(0)
         with cls.open_buffer(buf, *args, **kargs) as archive:
             return cls(archive, paths)
-    
+
     def __init__(self, archive, paths):
         """ Given an already open archive file, create a recurive list of the
         contents, including files inside archives contained in this one. The
@@ -254,37 +256,37 @@ class ArchiveWalker(object):
             logging.warning(
                 "I/O error on %s (%s)" % (concat_paths(self.paths), ex.strerror)
             )
-        
+
     def _populate(self):
         """ Populates the "contents" member with the recursively found files. It
         is better to do it all at once so the file is not kept open for too
         long.
-        """        
+        """
         # This is a similar approach to that in DirectoryWalker, but the
         # get_members() function returns a flat list rather than the recursive
         # structure of os.walk. We list each file and directory, and if a file
         # is an archive, we get access to the data as a buffer and recurse into
-        # it.        
-        for member in self.get_members():           
+        # it.
+        for member in self.get_members():
             # This keeps track of our location in the filesystem and any
             # archives we're already nested inside.
             nested_paths = self.paths + (self.member_path(member),)
             self.contents.append(NamedNode(nested_paths))
-            
+
             # Inspect files to see if they're archives
-            if self.isfile(member):
+            if self.could_be_archive(member):
                 with closing(self.extract(member)) as inner_file:
                     magic_bytes = inner_file.read(MAGIC_BYTES_N)
                     inner_mime_type = magic.from_buffer(
                         magic_bytes,
                         mime=True
                     )
-                    
+
                     archive_mode = TAR_MIME_TYPES.get(
                         inner_mime_type,
                         None
                     )
-                    
+
                     is_zipfile = inner_mime_type in ZIP_MIME_TYPES
 
                     # If it's an archive, create another ArchiveWalker instance
@@ -297,7 +299,7 @@ class ArchiveWalker(object):
                                     nested_paths,
                                     archive_mode
                                 ).contents)
-                        except tarfile.ReadError as tferr:
+                        except (tarfile.ReadError, EOFError) as tferr:
                             # Keep going on exceptions, but warn the user.
                             logging.warning(
                                 "Could not open: %s" % concat_paths(nested_paths)
@@ -320,16 +322,16 @@ class TarWalker(ArchiveWalker):
     """ Recursively inspects the contents of TAR archives (including gz or bz2
     compressed archives).
     """
-    
+
     # By default, the tarfile module will decode entries in a PAX-format archive
     # and then re-encode them based on the current system. It would be better if
     # we could just get the unicode sequence in the first place, but since we
     # can't we'll just force it to re-encode to UTF-8 instead, and then decode
     # it again when we need to.
     ENCODING = 'utf8'
-    
+
     # The following methods are mostly a wrapper around TarFile
-    
+
     @classmethod
     def open_path(cls, path, mode='r:*'):
         return TarFile.open(path.joined, mode=mode, encoding=TarWalker.ENCODING)
@@ -340,27 +342,27 @@ class TarWalker(ArchiveWalker):
 
     def get_members(self):
         return self.archive.getmembers()
-    
+
     def member_path(self, member):
         return Path.posix(member.name.decode(self.ENCODING))
-    
+
     def extract(self, member):
         return self.archive.extractfile(member)
 
-    def isfile(self, member):
+    def could_be_archive(self, member):
         return member.isfile()
 
 
 class ZipWalker(ArchiveWalker):
-    """ Recursively inspects the contents of ZIP archives. """    
-    
+    """ Recursively inspects the contents of ZIP archives. """
+
     # Mystery! There is no official zipfile encoding, and the archive format
     # doesn't contain it. The Python docs say that WinZip guesses CP-437, so
     # let's use that!
     ENCODING = 'cp437'
-    
+
     # ZipFile is a little trickier than TarFile, but still fairly simple
-    
+
     @classmethod
     def open_path(cls, path):
         return ZipFile(path.joined, 'r')
@@ -369,14 +371,32 @@ class ZipWalker(ArchiveWalker):
     def open_buffer(cls, buf):
         return ZipFile(buf, 'r')
 
+    def __init__(self, archive, paths, *args, **kwargs):
+        # There are some zip formats that are not supported by the zipfile
+        # module (eg. implode). We need to intercept initialisation here so that
+        # we can set a flag for later methods to know whether they can extract
+        # files or not.
+        try:
+            archive.testzip()
+        except NotImplementedError:
+            # This indicates an unsupported archive format
+            logging.warning(
+                "Extracting contents not supported for %s" % concat_paths(paths)
+            )
+            self.extractable = False
+        else:
+            self.extractable = True
+
+        super(ZipWalker, self).__init__(archive, paths, *args, **kwargs)
+
     def get_members(self):
         return self.archive.infolist()
-    
+
     def member_path(self, member):
         # Although it's not documented, ZIP file paths are always '/' separated,
         # and directories end in a '/'. So this works for both kinds of archive.
         return Path.posix(member.filename.decode(self.ENCODING))
-    
+
     def extract(self, member):
         # Unfortunately, ZipFile extraction is not as seamless as it is for
         # TarFile objects. We need to read the file into memory and operate on
@@ -384,9 +404,9 @@ class ZipWalker(ArchiveWalker):
         # the original archive.
         return StringIO(self.archive.read(member))
 
-    def isfile(self, member):
+    def could_be_archive(self, member):
         # Files won't have a trailing '/'
-        return not member.filename.endswith('/')
+        return self.extractable and not member.filename.endswith('/')
 
 
 # The following classes deal with filtering the results from a file search.
@@ -399,14 +419,14 @@ class TextSearcher(object):
     """ Simple, non-wildcard search for text in a file name. Can be case-
     sensitive or case-insensitive.
     """
-    
+
     def __init__(self, search_text, case_sensitive):
         """ Creates a callable object that will take a sequence of Path objects
         and search for the given text.
         """
         self.search_text = search_text
         self.case_sensitive = case_sensitive
-        
+
     def __call__(self, paths):
         """ Returns True if the last path in the sequence contains the text. """
         path_tip = paths[-1][-1]
@@ -424,14 +444,14 @@ class GlobSearcher(object):
     """ UNIX-like glob pattern matching search. Can be case-sensitive or
     case-insenitive.
     """
-    
+
     def __init__(self, pattern, case_sensitive):
         """ Creates a callable object that will take a sequence of Path objects
         and search for those that match the given pattern.
         """
         self.pattern = pattern
         self.case_sensitive = case_sensitive
-        
+
     def __call__(self, paths):
         """ Returns True if the last path in the sequence matches the pattern.
         """
@@ -455,9 +475,9 @@ def verbose_reporter():
     arbitarily depth, in a way that's easy to visually parse. """
     # We don't actually need a context manager here, so just create the function
     # and yield it.
-    def reporter(paths):        
+    def reporter(paths):
         print paths[0].joined.encode(CLI_ENCODING)
-        
+
         if len(paths) > 1:
             indent_level = 0
             for path in paths[1:]:
@@ -498,14 +518,14 @@ def archive_search(base_path, search_func, reporter):
     """ Recursively list all files and directories below the given base path,
     checking inside directories and archives to an arbitrary depth, and
     filtering using the given filter function.
-    
+
     The base path should be a Path object, and the filter function should take
     a sequence of Path objects and return a boolean if the path is a valid
     result.
     """
     base_path_kind = magic.from_file(base_path.joined.encode(sys.getfilesystemencoding()), mime=True)
     base_path_class = SEARCH_BASES.get(base_path_kind, DEFAULT_SEARCH_BASE)
-        
+
     try:
         base_walker = base_path_class(base_path)
     except (tarfile.ReadError, zipfile.BadZipfile):
@@ -514,18 +534,18 @@ def archive_search(base_path, search_func, reporter):
             "Could not open: %s" % concat_paths((base_path,))
         )
         return
-    
+
     to_process = deque((base_walker,))
-    
+
     # Iterate over a stack of discovered files, filtering as we go
     with reporter() as report_func:
         while to_process:
             node = to_process.pop()
             paths = node.paths
-            
+
             if search_func(paths):
                 report_func(paths)
-            
+
             # If this node has contents, add them to the stack and keep iterating
             to_process.extendleft(node.contents)
 
@@ -538,23 +558,23 @@ def main(base_path, search_text=None, case_sensitive=False, glob=False, json=Fal
         reporter = json_reporter
     else:
         reporter = verbose_reporter
-    
+
     if search_text is None:
         search_func = MatchAll
     elif glob:
         search_func = GlobSearcher(search_text, case_sensitive)
     else:
         search_func = TextSearcher(search_text, case_sensitive)
-    
+
     archive_search(Path.os(base_path), search_func, reporter)
-    
+
 
 if __name__ == '__main__':
     # Exit cleanly on Ctrl+C
-    signal.signal(signal.SIGINT, interrupt_handler)    
-    
+    signal.signal(signal.SIGINT, interrupt_handler)
+
     # Get the incoming CLI arguments into shape for the rest of the script by
-    # parsing and decoding them.    
+    # parsing and decoding them.
     parser = argparse.ArgumentParser(
         description=PROG_TEXT
     )
@@ -568,25 +588,25 @@ if __name__ == '__main__':
     parser.add_argument('-g', '--glob', action='store_true')
     parser.add_argument('-j', '--json', action='store_true')
     parser.add_argument('-q', '--quiet', action='store_true')
-    
+
     args = parser.parse_args()
-    
+
     if args.search_text:
         search_text = d_cl(args.search_text)
     else:
         search_text = None
-    
+
     if args.quiet:
         log_level = logging.ERROR
     else:
         log_level = logging.WARNING
-    
+
     # Prepare the logging format for command-line use
     logging.basicConfig(
         format='%(levelname)s %(message)s',
         level=log_level
     )
-    
+
     main(
         d_cl(args.search_path),
         search_text,
