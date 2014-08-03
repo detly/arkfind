@@ -507,6 +507,9 @@ SEARCH_BASES = {
     'application/x-bzip2' : TarWalker.from_path,
     'application/x-gzip'  : TarWalker.from_path,
     'application/x-tar'   : TarWalker.from_path,
+    'application/bzip2'   : TarWalker.from_path,
+    'application/gzip'    : TarWalker.from_path,
+    'application/tar'     : TarWalker.from_path,
     'application/zip'     : ZipWalker.from_path,
     'inode/directory'     : DirectoryWalker
 }
