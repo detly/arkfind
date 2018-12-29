@@ -526,7 +526,12 @@ def archive_search(base_path, search_func, reporter):
     a sequence of Path objects and return a boolean if the path is a valid
     result.
     """
-    base_path_kind = magic.from_file(base_path.joined.encode(sys.getfilesystemencoding()), mime=True)
+    encoded_path = base_path.joined.encode(sys.getfilesystemencoding())
+    if os.path.isdir(encoded_path):
+        base_path_kind = 'inode/directory'
+    else:
+        base_path_kind = magic.from_file(encoded_path, mime=True)
+
     base_path_class = SEARCH_BASES.get(base_path_kind, DEFAULT_SEARCH_BASE)
 
     try:
