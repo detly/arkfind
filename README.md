@@ -33,16 +33,20 @@ ended up with TAR files inside ZIP files, and there are many such ZIP files all
 inside one big TAR.BZ2 file. You want to find a file called "magic.txt", so you
 use the script like so:
 
-    $ arkfind AllBackups.tar.bz2 "magic.txt"
-    AllBackups.tar.bz2
-      > backups_2006/lab_pc/MISC.zip
-          > misc_lab_stuff/magic.txt
+```bash
+$ arkfind AllBackups.tar.bz2 "magic.txt"
+AllBackups.tar.bz2
+  > backups_2006/lab_pc/MISC.zip
+	  > misc_lab_stuff/magic.txt
+```
         
 Maybe you have a directory full of such archives, and you can't remember the
 whole name of the file. You can do this:
 
-    $ arkfind -g backups/ "magic*.*"
-    backups/backup_2007.zip
-      > 06/magic_june_2007.rtf
-    backups/backup_2008.zip
-      > 01/magic_jan_2008.html
+```bash
+$ arkfind -g backups/ "magic*.*"
+backups/backup_2007.zip
+  > 06/magic_june_2007.rtf
+backups/backup_2008.zip
+  > 01/magic_jan_2008.html
+```
